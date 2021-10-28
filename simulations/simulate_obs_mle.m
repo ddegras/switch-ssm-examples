@@ -11,7 +11,7 @@ Tgrid = [400,600,800,1000]; % time series length
 nN = numel(Ngrid);
 nT = numel(Tgrid);
 NTgrid = [repelem(Ngrid,1,nT); repmat(Tgrid,1,nN)];
-nrep = 6; %500; % number of replications for each N
+nrep = 500; % number of replications for each N
 method_list = {'sw-km', 'switch-ols', 'switch-ml', 'or-ols', 'or-ml'};
 nmethods = numel(method_list);
 npars = 5; % A C Q R Z
@@ -24,7 +24,7 @@ p = 2; % VAR order
 r = 2;  % state vector dimension
 
 
-for i = 12:12 % 1:nN*nT
+for i = 1:nN*nT
     tic
     N = NTgrid(1,i);
     T = NTgrid(2,i);
@@ -127,6 +127,7 @@ for i = 12:12 % 1:nN*nT
 
 
         % VAR transition matrices
+        A = []; Abig = []; Q = []; theta = [];
         stable = false;
         snr = false;
         while ~stable || ~snr
@@ -157,8 +158,8 @@ for i = 12:12 % 1:nN*nT
             theta = struct('A',A, 'C',C, 'Q',Q, 'R',R, 'mu',mu, ...
                 'Sigma',Sigma, 'Pi',Pi,'Z',Z);
 
-            [ACF,~,COV,VAR] = get_covariance(theta,nlags,0);
-            signal = sum(VAR) - sum(diag(R));
+            stationary = get_covariance(theta,nlags,0);           
+            signal = sum(stationary.VAR) - sum(diag(R));
             noise = sum(diag(R));
             snr = all(signal >= 5 * noise & signal <= 10 * noise);
         end
@@ -168,19 +169,9 @@ for i = 12:12 % 1:nN*nT
         Q = Q(mask_Q);
         R = R(mask_R);
         Z = Z(:);
-        ACF = ACF(mask_ACF);
-        COR = zeros(N,N,M);
-        for j = 1:M
-            try
-                COR(:,:,j) = corrcov(COV(:,:,j) + COV(:,:,j)');
-            catch
-                SDj = sqrt(diag(COVhat(:,:,j)));
-                SDj(SDj < eps(1)) = 1;
-                CORhat(:,:,j) = (1 ./ SDj) .* COVhat(:,:,j) ./ (SDj');
-            end
-        end
-        COV = COV(mask_COV);
-        COR = COR(mask_COR);
+        ACF = stationary.ACF(mask_ACF);
+        COR = stationary.COR(mask_COR);
+        COV = stationary.COV(mask_COV);
         
         
         
@@ -229,7 +220,7 @@ for i = 12:12 % 1:nN*nT
         method_list_tmp = method_list;
         
         for k = 1:1 % 1:nmethods 
-            pars = []; Shat = [];
+            pars = []; Shat = []; Zhat = [];
             method_name = method_list_tmp{k};
             switch method_name
             
@@ -346,8 +337,7 @@ for i = 12:12 % 1:nN*nT
                     pars.A(:,:,:,sigma) = pars.A;
                     pars.C(:,:,sigma) = pars.C;
                     pars.Q(:,:,sigma) = pars.Q;
-                    pars.Z(sigma,sigma) = pars.Z;
-                    Zhat = pars.Z;
+                    pars.Z(sigma,sigma) = pars.Z;                   
                 end
             end
             
@@ -396,13 +386,10 @@ for i = 12:12 % 1:nN*nT
                     end
                 end
             else
-                [ACFhat,~,COVhat,VARhat] = get_covariance(pars,nlags,0);
-                CORhat = zeros(N,N,M);
-                for j = 1:M                          
-                    SDj = sqrt(VARhat(:,j));
-                    SDj(SDj < eps(1)) = 1;
-                    CORhat(:,:,j) = (1 ./ SDj) .* COVhat(:,:,j) ./ (SDj'); 
-                end
+                stationary = get_covariance(pars,nlags,0);
+                COVhat = stationary.COV;
+                CORhat = stationary.COR;
+                ACFhat = stationary.ACF;
            end
             
             % Reshape estimates
@@ -501,8 +488,7 @@ for i = 12:12 % 1:nN*nT
 
     clear -regexp mask
     outfile = sprintf('result_sim_obs_N%dT%d.mat',N,T);
-%     outfile = sprintf('result_swkm31_obs_N%dT%d.mat',N,T);
-%     save(outfile);
+    save(outfile);
 
     
 end

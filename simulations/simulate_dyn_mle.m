@@ -124,6 +124,7 @@ for i = 1:nN*nT
 
         stable = false;
         snr = false;
+        A = []; Q = []; theta = []; stationary = [];
         while ~stable || ~snr
             % VAR transition matrices
             A = rand(r,r,p,M); 
@@ -153,8 +154,8 @@ for i = 1:nN*nT
             theta = struct('A',A, 'C',C, 'Q',Q, 'R',R, 'mu',mu, ...
                 'Sigma',Sigma, 'Pi',Pi,'Z',Z);
 
-            [ACF,~,COV,VAR] = get_covariance(theta,nlags,0);
-            signal = sum(VAR) - sum(diag(R));
+            stationary = get_covariance(theta,nlags,0);
+            signal = sum(stationary.VAR) - sum(diag(R));
             noise = sum(diag(R));
             snr = all(signal >= 5 * noise & signal <= 10 * noise);
         end
@@ -164,13 +165,9 @@ for i = 1:nN*nT
         Q = Q(mask_Q);
         R = R(mask_R);
         Z = Z(:);
-        ACF = ACF(mask_ACF);
-        COR = zeros(N,N,M);
-        for j = 1:M
-            COR(:,:,j) = corrcov(COV(:,:,j) + COV(:,:,j)');
-        end
-        COV = COV(mask_COV);
-        COR = COR(mask_COR);
+        ACF = stationary.ACF(mask_ACF);
+        COV = stationary.COV(mask_COV);
+        COR = stationary.COR(mask_COR);
         
  
         
@@ -224,7 +221,7 @@ for i = 1:nN*nT
         
         for k = 1:nmethods 
 
-            pars = []; Shat = [];
+            pars = []; pars0 = []; Zhat = []; Shat = [];
             method_name = method_list_tmp{k};
             switch method_name
             
@@ -392,13 +389,10 @@ for i = 1:nN*nT
                     end
                 end
             else
-                [ACFhat,~,COVhat,VARhat] = get_covariance(pars,nlags,0);
-                CORhat = zeros(N,N,M);
-                for j = 1:M
-                    SDj = sqrt(VARhat(:,j));
-                    SDj(SDj < eps(1)) = 1;
-                    CORhat(:,:,j) = (1 ./ SDj) .* COVhat(:,:,j) ./ (SDj');            
-                end
+                stationary = get_covariance(pars,nlags,0);
+                COVhat = stationary.COV;
+                CORhat = stationary.COR;
+                ACFhat = stationary.ACF;
            end
              
             % Reshape estimates

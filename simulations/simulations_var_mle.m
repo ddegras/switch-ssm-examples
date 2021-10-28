@@ -6,9 +6,8 @@
 clc; clearvars; close all;
 
 % Simulation parameters
-% Ngrid = [10,50,100]; % time series dimension (# variables) 
-% Tgrid = [400,600,800,1000]; % time series length
-Ngrid = 10; Tgrid = 600;
+Ngrid = [10,50,100]; % time series dimension (# variables) 
+Tgrid = [400,600,800,1000]; % time series length
 nN = numel(Ngrid);
 nT = numel(Tgrid);
 NTgrid = [repelem(Ngrid,1,nT); repmat(Tgrid,1,nN)];
@@ -104,6 +103,7 @@ for i = 1:nN*nT
         % observation level
         stable = false;
         snr = false;
+        A = []; Q = []; theta = []; stationary = [];
         while ~stable || ~snr
             % Transition matrices for dynamics
             A = zeros(N,N,p,M);
@@ -139,13 +139,13 @@ for i = 1:nN*nT
 
             % Stationary variance matrices and autocorrelation functions
             theta = struct('A',A,'Q',Q);
-            [ACF,~,COV] = get_covariance(theta,nlags,0);
+            stationary = get_covariance(theta,nlags,0);
 
             % Test SNR
             signal = zeros(1,M); 
             noise = zeros(1,M);
             for j = 1:M
-                signal(j) = sum(diag(COV(:,:,j))) - sum(diag(Q(:,:,j)));
+                signal(j) = sum(stationary.VAR(:,j)) - sum(diag(Q(:,:,j)));
                 noise(j) = sum(diag(Q(:,:,j)));
             end
             snr = all(signal >= 5 * noise & signal <= 10 * noise);        
@@ -170,13 +170,9 @@ for i = 1:nN*nT
         A = A(:);
         Q = Q(mask_COV);
         Z = Z(:);
-        ACF = ACF(mask_ACF);
-        COR = zeros(N,N,M);
-        for j = 1:M
-            COR(:,:,j) = corrcov(COV(:,:,j) + COV(:,:,j)');
-        end
-        COV = COV(mask_COV);
-        COR = COR(mask_COR);
+        ACF = stationary.ACF(mask_ACF);
+        COV = stationary.COV(mask_COV);
+        COR = stationary.COR(mask_COR);
        
         
 %-------------------------------------------------------------------------%
@@ -234,7 +230,7 @@ for i = 1:nN*nT
 
         for k = 1:nmethods 
             
-            pars = []; Shat = [];      
+            pars = []; pars0 = []; Zhat = []; Shat = [];
             method_name = method_list_tmp{k};
             switch method_name
             
@@ -336,12 +332,11 @@ for i = 1:nN*nT
             if ~isequal(sigma,1:M)
                 Shat = sigma(Shat);
                 if strcmp(method_name,'sw-km')
-                    Zhat(sigma,sigma) = Zhat; 
+                    Zhat(sigma,sigma) = Zhat;  %#ok<SAGROW>
                 else    
                     pars.A(:,:,:,sigma) = pars.A;
                     pars.Q(:,:,sigma) = pars.Q;
                     pars.Z(sigma,sigma) = pars.Z;
-                    Zhat = pars.Z;
                  end
             end
               
@@ -349,7 +344,7 @@ for i = 1:nN*nT
             
             
 %-------------------------------------------------------------------------%
-%     Performance in cross-covariance estimation (connectivity measures)  %
+%       Performance in covariance estimation (connectivity measures)      %
 %-------------------------------------------------------------------------%
       
             % Estimate long-run variance matrices V(y(t)|S(t)=j)
@@ -391,13 +386,10 @@ for i = 1:nN*nT
                     end
                 end
             else
-                [ACFhat,~,COVhat,VARhat] = get_covariance(pars,nlags,0);
-                CORhat = zeros(N,N,M);
-                for j = 1:M
-                    SDj = sqrt(VARhat(:,j));
-                    SDj(SDj < eps(1)) = 1;
-                    CORhat(:,:,j) = (1 ./ SDj) .* COVhat(:,:,j) ./ (SDj');
-                end
+                stationary = get_covariance(pars,nlags,0);
+                COVhat = stationary.COV;
+                CORhat = stationary.COR;
+                ACFhat = stationary.ACF;                
             end
              
             % Reshape estimates
@@ -427,7 +419,7 @@ for i = 1:nN*nT
                 % Reshape estimates
                 Ahat = pars.A(:);
                 Qhat = pars.Q(mask_COV);              
-                
+                Zhat = pars.Z;
                 RE_theta_tmp(k,1) = norm(Ahat-A,1) / norm(A,1);
                 MSE_theta_tmp(k,1) = mean((Ahat-A).^2);
                 RE_theta_tmp(k,2) = norm(Qhat-Q,1)/norm(Q,1);
@@ -482,7 +474,6 @@ for i = 1:nN*nT
     clear idx ans
 
     outfile = sprintf('result_sim_var_N%dT%d.mat',N,T);
-    % outfile = sprintf('result_swkm31_var_N%dT%d.mat',N,T);
     save(outfile);
 
 
