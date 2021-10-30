@@ -40,8 +40,8 @@ if exist('B','var') && ~isempty(B)
     end
 
     % Distance between sets
-    dist1 = min(wA .* D,1);
-    dist2 = min(D .* (wB'),2);
+    dist1 = min(wA .* D,[],1);
+    dist2 = min(D .* (wB'),[],2);
     dAB = 0.5 * sum(dist1) + 0.5 * sum(dist2); 
 
 else
