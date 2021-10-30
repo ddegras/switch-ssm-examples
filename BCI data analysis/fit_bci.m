@@ -29,6 +29,11 @@ end
 if ~exist('control2','var')
     control2 = [];
 end
+verbose2 = true;
+if isstruct(control2) && isfield(control2,'verbose')
+    verbose2 = control2.verbose;
+end
+verbose2 = verbose && verbose2; 
 if ~exist('ncycles','var')
     ncycles = 5;
 end
@@ -39,7 +44,7 @@ LL = [];
 % Main loop  
 for i = 1:ncycles
     if verbose 
-        fprintf('Cycle %d\n',i);
+        fprintf('\n\nCycle %d\n\n',i);
     end
     LLbestold = LLbest;
     if i == 2 && isstruct(control) 
@@ -61,9 +66,11 @@ for i = 1:ncycles
     end   
     
     % Acceleration: fit EM with regimes fixed to most likely values 
-    fprintf('\n\n');
+     if verbose2
+        fprintf('\n\n');  
+    end
     [~,~,pars] = fast_fun(y,M,p,r,Shat,pars,control2);
-    fprintf('\n\n');    
+   
 end
 
 % AIC and BIC scores
