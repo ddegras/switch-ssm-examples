@@ -23,29 +23,27 @@ N = 59;
 
 % EM control parameters
 verbose = true;
-control = struct('eps',1e-4,'ItrNo',1,'beta0',0.5,'betarate',1.02,... 
-    'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',verbose); 
-control2 = struct('eps',5e-6,'ItrNo',1,... 
-    'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',false);
-% control = struct('eps',1e-4,'ItrNo',50,'beta0',0.5,'betarate',1.02,... 
-%     'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',true); 
-% control2 = struct('eps',5e-6,'ItrNo',500,... 
-%     'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',true);
+control = struct('eps',1e-4,'ItrNo',50,'beta0',0.5,'betarate',1.02,... 
+    'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',true); 
+control2 = struct('eps',5e-6,'ItrNo',500,... 
+    'abstol',1e-8,'reltol',1e-8,'safe',false,'verbose',true);
 opts = struct('segmentation','fixed','len',1000,'Replicates',20);
 ncycles = 1; % 5;
 
 % Result objects
-unsupervised_pars = cell(nsubs,nsess); % estimated model parameters
-supervised_pars = cell(nsubs,nsess); % estimated model parameters
-dfc_measures = cell(nsubs,nsess); % ynamic FC components
+unsupervised_fit = cell(nsubs,nsess); % estimated model parameters
+supervised_fit = cell(nsubs,nsess); % estimated model parameters
+dfc_measures = cell(nsubs,nsess); % dynamic FC components
 
 
 for i = 1:nsubs
+
+    subject = subs{i};
+    
     for k = 1:nsess
        
-        subject = subs{i};
         session = sess{k};        
-        fprintf('\n\nSubject %s Session %s\n\n',upper(subject),...
+        fprintf('\n\nSubject %s Session %s',upper(subject),...
             upper(session));
         
         % Load data
@@ -74,6 +72,14 @@ for i = 1:nsubs
                 S = S(1:size(y,2));
                 S = S + 2;
         end
+                
+        % Relabel any missing value in stimulus sequence as extra task (#4) 
+        test = isnan(S);
+        ntasks = length(unique(S(~test)));
+        if any(test)
+            S(test) = ntasks + 1;
+            ntasks = ntasks + 1;
+        end
         
         
         %================================================
@@ -82,18 +88,18 @@ for i = 1:nsubs
 
         out1 = fit_bci(y,model,M,p,r,opts,control,control2,ncycles);
         out1.subject = subject; out1.session = session; out1.task = S;
-        unsupervised_pars{i,k} = out1; 
+        unsupervised_fit{i,k} = out1; 
         
         
         %==============================================
         % Fit switching dynamics model (supervised fit)
         %==============================================        
         
-        [~,~,pars,LL] = fast_dyn(y,3,p,r,S,[],control2);        
+        [~,~,pars,LL] = fast_dyn(y,ntasks,p,r,S,[],control2);        
         out2 = struct();
         out2.subject = subject; out2.session = session; 
         out2.pars = pars; out2.LL = max(LL); out2.task = S;
-        supervised_pars{i,k} = out2;        
+        supervised_fit{i,k} = out2;        
                    
         
         %========================
@@ -115,8 +121,8 @@ end
 clear cnt dwell out* S stationary y
 
 % Save results
-save('unsupervised_pars.mat','model_pars')
-save('supervised_pars.mat','model_pars')
+save('unsupervised_pars.mat','unsupervised_fit')
+save('supervised_pars.mat','supervised_fit')
 save('dfc_measures.mat','dfc_measures')
 
 
@@ -135,22 +141,21 @@ save('dfc_measures.mat','dfc_measures')
 
 % Prepare DFC measure for clustering 
 dfc = zeros(N*(N+1)/2,M,nsubs,nsess);
-mask = logical(tril(ones(N)));
+mask = repmat(logical(tril(ones(N))),1,1,M);
 dwell = zeros(M,nsubs,nsess);
 for session = 1:nsess
     for sub = 1:nsubs
-        dfc(:,:,:,sub,session) = ...
-            dfc_measures{sub,session}.COV(mask);
+        dfc(:,:,sub,session) = ...
+            reshape(dfc_measures{sub,session}.COV(mask),[],M);
         dwell(:,sub,session) = dfc_measures{sub,session}.dwell(:,3) / 100;
     end
 end
 dfc = reshape(dfc,N*(N+1)/2,M*nsubs*nsess);
 dfc = dfc ./ sqrt(sum(dfc.^2));
 
-
 % Calculate clustering distances
 metric = 'squaredeuclidean';
-z = linkage(dfc_mat','complete',metric);
+z = linkage(dfc','complete',metric);
 dendrogram(z)
 
 % Hierarchical clustering
@@ -174,18 +179,19 @@ for c = 1:nvalid
     clf   
     idx = find(clust == tab(valid(c),1));
     [regime,subject,session] = ind2sub([M,nsubs,nsess],idx);
-    nr = ceil(cluster_size(c,2)/5);
+    nr = ceil(cluster_size(valid(c))/5);
     if nr == 1
-        nc = cluster_size(c,2);
+        nc = cluster_size(valid(c));
     else
         nc = 5;
     end
     tiledlayout(nr,nc,'Padding','compact')    
-    for i = 1:cluster_size(c)
+    for i = 1:cluster_size(valid(c))
         nexttile
         imagesc(dfc_measures{subject(i),session(i)}.COV(:,:,regime(i)));
-        yticks(1:N);
-        xticklabels([]); yticklabels(channel);
+        xticklabels([]);
+%         xticks(1:N); xticklabels(channel); xtickangle(90); 
+        yticks(1:N); yticklabels(channel);
         title_i = sprintf('%s-%d-%s (%2.1f%%)',subs{subject(i)}, ...
             regime(i), sess{session(i)}, ...
             dwell(regime(i),subject(i),session(i))*100);
@@ -269,8 +275,10 @@ for i = 1:nsubs
     end
 end
 
-labels = {'calb-A','calb-B','calb-F','calb-G','eval-A','eval-B',...
-    'eval-F','eval-G'};
+labels = compose("%s-%s",repelem(upper(sess(:)),nsubs),...
+    repmat(upper(subs(:)),nsess,1));
+
+
 table1 = cell2table(num2cell(table1),'RowNames',labels,'VariableNames',labels);
 disp(table1);
 
@@ -287,17 +295,29 @@ disp(table1);
 
 % TABLE 2 OF SUPPLEMENTARY MATERIALS
 
-ntasks = 3;
-session = 1; % calibration
+session = 1; % calibration 
+ntasks = 3; 
+tasks = struct('a',["left";"foot";"rest"], 'b', ["left";"right";"rest"], ...
+    'f',["left";"foot";"rest"], 'g', ["left";"right";"rest"]);
+
 table2 = zeros(nsubs*ntasks,M);
 for i = 1:nsubs
     idx = (i-1)*ntasks+1:i*ntasks;
-    table2(idx,:) = crosstab(unsupervised_fit{i,1}.task,...
-        unsupervised_fit{i,1}.regime);
+    table2(idx,:) = crosstab(unsupervised_fit{i,session}.task,...
+        unsupervised_fit{i,session}.regime);
+    table2(idx,:) = table2(idx,:) ./ sum(table2(idx,:)) * 100; 
 end
-rlabels = {'A-left','A-foot','A-rest','B-left','B-foot','B-rest',...
-    'F-left','F-foot','F-rest','G-left','G-foot','G-rest'};
-clabels = {'Regime 1','Regime 2','Regime 3','Regime 4','Regime 5'};
+labels1 = repelem(upper(subs(:)),ntasks); 
+labels2 = string(1:nsubs*ntasks);
+for i = 1:nsubs
+    idx = (i-1)*ntasks+1:i*ntasks;
+    labels2(idx) = tasks.(subs(i));
+end
+labels2 = labels2(:);
+rlabels = compose("%s-%s",labels1,labels2);
+labels1 = repelem("Regime",M);
+labels2 = 1:M;
+clabels = compose("%s %d",labels1(:),labels2(:));
 table2 = cell2table(num2cell(table2),'RowNames',rlabels,'VariableNames',clabels);
 disp(table2);
 
